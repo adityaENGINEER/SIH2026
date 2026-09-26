@@ -29,6 +29,23 @@ services:
         condition: service_healthy
     restart: "no"
 
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_password_here}
+      POSTGRES_DB: ${POSTGRES_DB:-sovereignai}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-sovereignai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build: ./backend
     ports:
@@ -41,6 +58,8 @@ services:
       - sovereign-storage:/data/storage
     depends_on:
       ollama:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
       model-provisioner:
         condition: service_completed_successfully
@@ -73,3 +92,4 @@ services:
 volumes:
   sovereign-storage:
   ollama-models:
+  postgres-data:

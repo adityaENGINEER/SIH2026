@@ -4,16 +4,11 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from app.core.config import settings
+from app.repositories.security_repository import get_security_repository
 
 class SecurityService:
     def __init__(self):
-        self.security_dir = os.path.join(settings.storage_root, "security")
-        os.makedirs(self.security_dir, exist_ok=True)
-        # Store events in a daily log file or single list for simplicity, but let's use a single events.json for now
-        self.events_file = os.path.join(self.security_dir, "events.json")
-        if not os.path.exists(self.events_file):
-            with open(self.events_file, "w", encoding="utf-8") as f:
-                json.dump([], f)
+        self.repo = get_security_repository()
 
     def log_event(
         self,
@@ -26,32 +21,16 @@ class SecurityService:
         task_id: Optional[str] = None,
         agent_run_id: Optional[str] = None
     ) -> Dict[str, Any]:
-        event = {
-            "event_id": f"evt_{datetime.now().strftime('%Y%m%d')}_{uuid.uuid4().hex[:8]}",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "event_type": event_type,
-            "source": source,
-            "destination": destination,
-            "allowed": allowed,
-            "blocked": not allowed,
-            "reason": reason,
-            "project_id": project_id,
-            "task_id": task_id,
-            "agent_run_id": agent_run_id
-        }
-        
-        try:
-            with open(self.events_file, "r+", encoding="utf-8") as f:
-                events = json.load(f)
-                events.insert(0, event) # latest first
-                f.seek(0)
-                json.dump(events, f, indent=2)
-                f.truncate()
-        except Exception:
-            # Handle concurrent writes or corruption safely by appending
-            pass
-            
-        return event
+        return self.repo.log_event(
+            event_type=event_type,
+            source=source,
+            destination=destination,
+            allowed=allowed,
+            reason=reason,
+            project_id=project_id,
+            task_id=task_id,
+            agent_run_id=agent_run_id
+        )
 
     @staticmethod
     def is_local_url(url: str) -> bool:
@@ -75,17 +54,7 @@ class SecurityService:
         return allowed
 
     def get_events(self, project_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        if not os.path.exists(self.events_file):
-            return []
-        try:
-            with open(self.events_file, "r", encoding="utf-8") as f:
-                events = json.load(f)
-        except Exception:
-            return []
-            
-        if project_id:
-            return [e for e in events if e.get("project_id") == project_id]
-        return events
+        return self.repo.get_events(project_id)
 
     def get_summary(self, project_id: Optional[str] = None) -> Dict[str, Any]:
         events = self.get_events(project_id)

@@ -13,3 +13,8 @@ numpy
 # Lazily imported by deliverable_service for PDF/PPTX deliverables (verified by import audit; present in dev venv but missing here).
 reportlab
 python-pptx
+
+# PostgreSQL Support
+SQLAlchemy>=2.0.0
+psycopg2-binary>=2.9.0
+alembic>=1.13.0

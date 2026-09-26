@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import List, Optional, Dict
 
 from app.core.config import settings
+from app.repositories.approval_repository import get_approval_repository
 
 logger = logging.getLogger(__name__)
 
@@ -31,45 +32,10 @@ ALLOWED_TRANSITIONS = {
 
 class ApprovalService:
     def __init__(self):
-        self.reviews_dir = settings.reviews_dir
-        os.makedirs(self.reviews_dir, exist_ok=True)
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-    def _project_dir(self, project_id: str) -> str:
-        p = os.path.join(self.reviews_dir, project_id)
-        # Path-traversal guard
-        if not os.path.abspath(p).startswith(os.path.abspath(self.reviews_dir)):
-            raise ValueError("Invalid project_id path.")
-        return p
-
-    def _approval_path(self, project_id: str, approval_id: str) -> str:
-        d = self._project_dir(project_id)
-        p = os.path.join(d, f"{approval_id}.json")
-        if not os.path.abspath(p).startswith(os.path.abspath(self.reviews_dir)):
-            raise ValueError("Invalid approval_id path.")
-        return p
+        self.repo = get_approval_repository()
 
     def _now(self) -> str:
         return datetime.utcnow().isoformat() + "Z"
-
-    def _save(self, data: dict, project_id: str, approval_id: str):
-        d = self._project_dir(project_id)
-        os.makedirs(d, exist_ok=True)
-        path = self._approval_path(project_id, approval_id)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-
-    def _load(self, project_id: str, approval_id: str) -> Optional[dict]:
-        path = self._approval_path(project_id, approval_id)
-        if not os.path.exists(path):
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return None
 
     # ------------------------------------------------------------------
     # CRUD
@@ -85,55 +51,24 @@ class ApprovalService:
         source_document_ids: Optional[List[str]] = None,
         output_document_ids: Optional[List[str]] = None,
     ) -> dict:
-        approval_id = f"appr_{uuid.uuid4().hex[:12]}"
-        now = self._now()
-        data = {
-            "approval_id": approval_id,
-            "project_id": project_id,
-            "conversation_id": conversation_id,
-            "task_id": task_id,
-            "agent_run_id": agent_run_id,
-            "deliverable_id": deliverable_id,
-            "title": title,
-            "status": "DRAFT",
-            "created_at": now,
-            "updated_at": now,
-            "submitted_at": None,
-            "reviewed_at": None,
-            "approver_name": None,
-            "employee_id": None,
-            "review_comment": None,
-            "rejection_reason": None,
-            "approval_reason": None,
-            "signature_status": "unsigned",
-            "source_document_ids": source_document_ids or [],
-            "output_document_ids": output_document_ids or [],
-        }
-        self._save(data, project_id, approval_id)
-        logger.info(f"Approval created: {approval_id} for project {project_id}")
+        data = self.repo.create_approval(
+            project_id=project_id,
+            title=title,
+            conversation_id=conversation_id,
+            task_id=task_id,
+            agent_run_id=agent_run_id,
+            deliverable_id=deliverable_id,
+            source_document_ids=source_document_ids,
+            output_document_ids=output_document_ids
+        )
+        logger.info(f"Approval created: {data['approval_id']} for project {project_id}")
         return data
 
     def get_approval(self, project_id: str, approval_id: str) -> Optional[dict]:
-        data = self._load(project_id, approval_id)
-        if data is None:
-            return None
-        # Enforce project isolation
-        if data.get("project_id") != project_id:
-            return None
-        return data
+        return self.repo.get_approval(project_id, approval_id)
 
     def list_approvals(self, project_id: str) -> List[dict]:
-        d = self._project_dir(project_id)
-        if not os.path.exists(d):
-            return []
-        results = []
-        for fname in os.listdir(d):
-            if fname.endswith(".json"):
-                approval_id = fname[:-5]
-                a = self._load(project_id, approval_id)
-                if a and a.get("project_id") == project_id:
-                    results.append(a)
-        return results
+        return self.repo.list_approvals(project_id)
 
     # ------------------------------------------------------------------
     # State transitions
@@ -154,10 +89,12 @@ class ApprovalService:
             }
         
         now = self._now()
-        data["status"] = "PENDING_HUMAN_SIGNOFF"
-        data["submitted_at"] = now
-        data["updated_at"] = now
-        self._save(data, project_id, approval_id)
+        updates = {
+            "status": "PENDING_HUMAN_SIGNOFF",
+            "submitted_at": now,
+            "updated_at": now
+        }
+        data = self.repo.update_approval(project_id, approval_id, updates)
         logger.info(f"Approval {approval_id} submitted for review.")
         return data
 
@@ -185,15 +122,17 @@ class ApprovalService:
             }
         
         now = self._now()
-        data["status"] = "APPROVED"
-        data["reviewed_at"] = now
-        data["updated_at"] = now
-        data["approver_name"] = approver_name
-        data["employee_id"] = employee_id
-        data["approval_reason"] = reason
-        data["review_comment"] = comment
-        data["signature_status"] = "signed"
-        self._save(data, project_id, approval_id)
+        updates = {
+            "status": "APPROVED",
+            "reviewed_at": now,
+            "updated_at": now,
+            "approver_name": approver_name,
+            "employee_id": employee_id,
+            "approval_reason": reason,
+            "review_comment": comment,
+            "signature_status": "signed"
+        }
+        data = self.repo.update_approval(project_id, approval_id, updates)
         logger.info(f"Approval {approval_id} APPROVED by {approver_name} (ID: {employee_id}).")
         return data
 
@@ -221,14 +160,16 @@ class ApprovalService:
             }
         
         now = self._now()
-        data["status"] = "REJECTED"
-        data["reviewed_at"] = now
-        data["updated_at"] = now
-        data["approver_name"] = approver_name
-        data["employee_id"] = employee_id
-        data["rejection_reason"] = reason
-        data["review_comment"] = comment
-        self._save(data, project_id, approval_id)
+        updates = {
+            "status": "REJECTED",
+            "reviewed_at": now,
+            "updated_at": now,
+            "approver_name": approver_name,
+            "employee_id": employee_id,
+            "rejection_reason": reason,
+            "review_comment": comment
+        }
+        data = self.repo.update_approval(project_id, approval_id, updates)
         logger.info(f"Approval {approval_id} REJECTED by {approver_name} (ID: {employee_id}).")
         return data
 

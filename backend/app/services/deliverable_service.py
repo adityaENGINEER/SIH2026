@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from app.core.config import settings
+from app.repositories.deliverable_repository import get_deliverable_repository
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class DeliverableService:
     def __init__(self):
         self.outputs_dir = os.path.join(settings.storage_root, "outputs")
         os.makedirs(self.outputs_dir, exist_ok=True)
+        self.repo = get_deliverable_repository()
 
     # ------------------------------------------------------------------
     # Path helpers
@@ -49,29 +51,8 @@ class DeliverableService:
             raise ValueError("Invalid deliverable_id path.")
         return d
 
-    def _meta_path(self, project_id: str, deliverable_id: str) -> str:
-        return os.path.join(self._deliverable_dir(project_id, deliverable_id), "metadata.json")
-
     def _now(self) -> str:
         return datetime.utcnow().isoformat() + "Z"
-
-    def _save_meta(self, meta: dict):
-        project_id = meta["project_id"]
-        deliverable_id = meta["deliverable_id"]
-        d = self._deliverable_dir(project_id, deliverable_id)
-        os.makedirs(d, exist_ok=True)
-        with open(self._meta_path(project_id, deliverable_id), "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2, ensure_ascii=False)
-
-    def _load_meta(self, project_id: str, deliverable_id: str) -> Optional[dict]:
-        path = self._meta_path(project_id, deliverable_id)
-        if not os.path.exists(path):
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return None
 
     # ------------------------------------------------------------------
     # File generators
@@ -253,20 +234,19 @@ class DeliverableService:
             return {"error": {"code": "DELIVERABLE_SAVE_FAILED", "message": "File was not created."}}
 
         size = os.path.getsize(file_path)
-        now = self._now()
-        meta = {
-            "deliverable_id": deliverable_id,
-            "project_id": project_id,
+        
+        self.repo.create_deliverable(deliverable_id, project_id, title, fmt)
+        updates = {
             "task_id": task_id,
             "approval_id": approval_id,
-            "type": fmt,
             "filename": filename,
+            "file_path": file_path,
             "path": file_path,
-            "created_at": now,
             "size": size,
-            "status": "ready",
+            "status": "ready"
         }
-        self._save_meta(meta)
+        meta = self.repo.update_deliverable(project_id, deliverable_id, updates)
+        
         logger.info(f"Deliverable created: {deliverable_id} ({fmt}) for project {project_id}")
         return meta
 
@@ -288,46 +268,26 @@ class DeliverableService:
         file_path = os.path.join(d_dir, filename)
         shutil.copyfile(source_path, file_path)
 
-        meta = {
-            "deliverable_id": deliverable_id,
-            "project_id": project_id,
+        self.repo.create_deliverable(deliverable_id, project_id, title, fmt)
+        updates = {
             "task_id": task_id,
             "approval_id": None,
-            "type": fmt,
             "filename": filename,
+            "file_path": file_path,
             "path": file_path,
-            "created_at": self._now(),
             "size": os.path.getsize(file_path),
-            "status": "ready",
+            "status": "ready"
         }
-        self._save_meta(meta)
-        return meta
+        return self.repo.update_deliverable(project_id, deliverable_id, updates)
 
     def link_approval(self, project_id: str, deliverable_id: str, approval_id: str):
-        meta = self.get_deliverable(project_id, deliverable_id)
-        if meta:
-            meta["approval_id"] = approval_id
-            self._save_meta(meta)
+        self.repo.update_deliverable(project_id, deliverable_id, {"approval_id": approval_id})
 
     def get_deliverable(self, project_id: str, deliverable_id: str) -> Optional[dict]:
-        meta = self._load_meta(project_id, deliverable_id)
-        if meta is None:
-            return None
-        # Enforce project isolation
-        if meta.get("project_id") != project_id:
-            return None
-        return meta
+        return self.repo.get_deliverable(project_id, deliverable_id)
 
     def list_deliverables(self, project_id: str) -> List[dict]:
-        pd = self._project_dir(project_id)
-        if not os.path.exists(pd):
-            return []
-        results = []
-        for dname in os.listdir(pd):
-            meta = self._load_meta(project_id, dname)
-            if meta and meta.get("project_id") == project_id:
-                results.append(meta)
-        return results
+        return self.repo.get_deliverables(project_id)
 
     def get_file_path(self, project_id: str, deliverable_id: str) -> dict:
         meta = self.get_deliverable(project_id, deliverable_id)

@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     # local dev setup; Docker Compose overrides this via CORS_ORIGINS.
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     
+    # Optional Persistence
+    persistence_backend: str = "json"  # "json" or "postgres"
+    database_url: str | None = None
+    
     rag_top_k: int = 3
     rag_max_top_k: int = 10
     rag_similarity_threshold: float = 0.35
