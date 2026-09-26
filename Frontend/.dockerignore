@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.git
+.env
+*.log
+.cache/
+.vite/
+# NOTE: .figma/make/site.json is imported by vite.config.ts at build time — do NOT ignore .figma.

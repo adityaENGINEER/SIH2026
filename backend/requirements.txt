@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+pydantic
+pydantic-settings
+httpx
+python-multipart
+PyMuPDF
+python-docx
+openpyxl
+pytesseract
+Pillow
+numpy
+# Lazily imported by deliverable_service for PDF/PPTX deliverables (verified by import audit; present in dev venv but missing here).
+reportlab
+python-pptx

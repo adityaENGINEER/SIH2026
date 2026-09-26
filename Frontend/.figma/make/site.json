@@ -1,0 +1,10 @@
+{
+  "description": "An enterprise-grade AI workbench offering modular tools for agent workflows, document management, security, and model control with device-specific interfaces.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

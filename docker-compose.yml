@@ -1,0 +1,75 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      # Host exposure is for debugging only; backend uses http://ollama:11434 internally.
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  # One-shot, idempotent model provisioning. Exits 0 only when every
+  # REQUIRED_MODELS tag is present in the ollama-models volume.
+  model-provisioner:
+    image: ollama/ollama:latest
+    entrypoint: ["/bin/sh", "/scripts/provision-models.sh"]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      REQUIRED_MODELS: "qwen2.5:3b-instruct moondream:latest nomic-embed-text:latest"
+    volumes:
+      - ./scripts/provision-models.sh:/scripts/provision-models.sh:ro
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      STORAGE_ROOT: /data/storage
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+    volumes:
+      - sovereign-storage:/data/storage
+    depends_on:
+      ollama:
+        condition: service_healthy
+      model-provisioner:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./Frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "5173:5173"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:5173/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  sovereign-storage:
+  ollama-models:

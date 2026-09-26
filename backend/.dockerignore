@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+*.log
+.pytest_cache/
+.mypy_cache/
+test_download_task_*.docx
